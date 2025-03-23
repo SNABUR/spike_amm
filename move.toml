@@ -1,0 +1,35 @@
+[package]
+name = "amm"
+version = "1.0.0"
+authors = []
+
+[addresses]
+
+FACTORY = "0x7f97c0e3126ba4c3ca25338a9d7feb93382733242c43b27cdcacde047466b859"
+spike_amm = "0x7f97c0e3126ba4c3ca25338a9d7feb93382733242c43b27cdcacde047466b859"
+admin = "0x7f97c0e3126ba4c3ca25338a9d7feb93382733242c43b27cdcacde047466b859"
+fee_admin = "0x7f97c0e3126ba4c3ca25338a9d7feb93382733242c43b27cdcacde047466b859"
+razor_libs = "0x6e3e09ab7fd0145d7befc0c68d6944ddc1a90fd45b8a6d28c76d8c48bed676b0"
+
+[dev-addresses]
+
+[dependencies.SupraFramework]
+git = "https://github.com/Entropy-Foundation/aptos-core.git"
+rev = "dev"
+subdir = "aptos-move/framework/supra-framework"
+
+[dependencies.AptosTokenObjects]
+git = "https://github.com/Entropy-Foundation/aptos-core.git"
+rev = "dev"
+subdir = "aptos-move/framework/aptos-token-objects"
+
+[dependencies.AptosToken]
+git = "https://github.com/Entropy-Foundation/aptos-core.git"
+rev = "dev"
+subdir = "aptos-move/framework/aptos-token"
+
+[dependencies.RazorLibs]
+git = "https://github.com/jarvisdegen/razor-libs.git"
+rev = "main"
+
+[dev-dependencies]
