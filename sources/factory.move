@@ -57,8 +57,10 @@ module spike_amm::amm_factory {
     let pair = amm_pair::initialize(token0, token1);
     let pair_address = object::object_address(&pair);
     let pair_seed = amm_pair::get_pair_seed(token0, token1);
-    smart_vector::push_back(&mut safe_factory_mut().all_pairs, pair_address);
-    simple_map::add(&mut safe_factory_mut().pair_map, pair_seed, pair_address);
+    let factory = safe_factory_mut();
+    smart_vector::push_back(&mut factory.all_pairs, pair_address);
+    simple_map::add(&mut factory.pair_map, pair_seed, pair_address);
+
 
     let creator = signer::address_of(sender);
 
@@ -173,6 +175,10 @@ module spike_amm::amm_factory {
   public fun pair_exists_for_frontend(pair: address): bool {
     let is_exists = object::object_exists<Pair>(pair);
     is_exists
+  }
+
+  public entry fun set_swap_fee(account: &signer, swap_fee: u8) {
+    amm_controller::set_swap_fee(account, swap_fee);
   }
 
   public entry fun pause(account: &signer) {
