@@ -32,6 +32,8 @@ module spike_amm::amm_oracle {
   const ERROR_AMOUNT_OUT_OVERFLOW: u64 = 5;
   /// Height difference is zero
   const ERROR_HEIGHT_DIFF_ZERO: u64 = 6;
+  /// Token not found
+  const ERROR_TOKEN_NOT_FOUND: u64 = 7;
 
   struct Observation has copy, drop, store {
     timestamp: u64,
@@ -67,20 +69,20 @@ module spike_amm::amm_oracle {
 
   const CYCLE: u64 = 1800; // 30 minutes
 
-  public entry fun initialize(anchor_token: Object<Metadata>) {
+  public entry fun initialize(sender: &signer, anchor_token: Object<Metadata>) {
+    assert!(signer::address_of(sender) == amm_controller::get_admin(), ERROR_ONLY_ADMIN);
     if (is_initialized()) {
-      return
+        return
     };
-
     let swap_signer = &amm_controller::get_signer();
     move_to(swap_signer, Oracle {
-      anchor_token: anchor_token,
-      block_info: BlockInfo {
-        height: block::get_current_block_height(),
-        timestamp: timestamp::now_seconds(),
-      },
-      pair_observations: simple_map::new<Object<Pair>, Observation>(),
-      router_tokens: smart_vector::new<Object<Metadata>>(),
+        anchor_token: anchor_token,
+        block_info: BlockInfo {
+            height: block::get_current_block_height(),
+            timestamp: timestamp::now_seconds(),
+        },
+        pair_observations: simple_map::new<Object<Pair>, Observation>(),
+        router_tokens: smart_vector::new<Object<Metadata>>(),
     });
   }
 
@@ -305,7 +307,8 @@ module spike_amm::amm_oracle {
     assert!(signer::address_of(sender) == amm_controller::get_admin(), ERROR_ONLY_ADMIN);
     let oracle = borrow_global_mut<Oracle>(@spike_amm);
     let tokens = &mut oracle.router_tokens;
-    let (_, index) = smart_vector::index_of(tokens, &token);
+    let (found, index) = smart_vector::index_of(tokens, &token);
+    assert!(found, ERROR_TOKEN_NOT_FOUND);
     smart_vector::remove(tokens, index);
 
     event::emit(RouterTokenEvent {
