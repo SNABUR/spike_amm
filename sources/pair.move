@@ -335,7 +335,7 @@ module spike_amm::amm_pair {
     fungible_token0: FungibleAsset,
     fungible_token1: FungibleAsset,
     to: address,
-  ) acquires Pair {
+  ): (u64, Object<Metadata>) acquires Pair {
     let sender_address = signer::address_of(sender);
     let token0 = fungible_asset::metadata_from_asset(&fungible_token0);
     let token1 = fungible_asset::metadata_from_asset(&fungible_token1);
@@ -386,6 +386,7 @@ module spike_amm::amm_pair {
     // feeOn
     if (fee_on) lp.k_last = (balance0 as u128) * (balance1 as u128);
 
+    let lp_token_metadata = object::address_to_object<Metadata>(object::object_address(&pool));
     let pair_address = liquidity_pool_address(token0, token1);
 
     event::emit(MintEvent {
@@ -396,6 +397,8 @@ module spike_amm::amm_pair {
       amount1,
       to
     });
+    
+    (lp_amount, lp_token_metadata)
   }
 
   public(friend) fun burn(
@@ -490,7 +493,9 @@ module spike_amm::amm_pair {
     let balance0 = fungible_asset::balance(store0);
     let balance1 = fungible_asset::balance(store1);
 
-    assert_k_increase(balance0, balance1, amount0_in, amount1_in, reserve0, reserve1);
+    let swap_fee = amm_controller::get_swap_fee();
+
+    assert_k_increase(balance0, balance1, amount0_in, amount1_in, reserve0, reserve1, swap_fee);
     // update
     update(lp, balance0, balance1, reserve0, reserve1);
 
@@ -516,9 +521,10 @@ module spike_amm::amm_pair {
     amount1_in: u64,
     reserve0: u64,
     reserve1: u64,
+    swap_fee: u8,
   ) {
-    let balance0_adjusted = (balance0 as u128) * 10000 - (amount0_in as u128) * (25);
-    let balance1_adjusted = (balance1 as u128) * 10000 - (amount1_in as u128) * (25);
+    let balance0_adjusted = (balance0 as u128) * 10000 - (amount0_in as u128) * (swap_fee as u128);
+    let balance1_adjusted = (balance1 as u128) * 10000 - (amount1_in as u128) * (swap_fee as u128);
     let balance01_old_not_scaled = (reserve0 as u128) * (reserve1 as u128);
     let scale = 100000000;
     if (
@@ -582,9 +588,9 @@ module spike_amm::amm_pair {
       lp_token_constructor_ref,
       option::none(),
       token_name,
-      string::utf8(b"SPIKER LP"),
+      string::utf8(b"SPIKE LP"),
       LP_TOKEN_DECIMALS,
-      string::utf8(b"https://ipfs.io/ipfs/QmUofuPhv74Swgkt5JCoZKM6Aipnp5iEnddHfzis5CRnxM"),
+      string::utf8(b"https://ipfs.io/ipfs/QmQgcmSftnsTWUoYYFjC84z9abCbdc7dopDMjcTNrcfoCJ"),
       string::utf8(b"https://swap.supraspike.fun"),
     );
 
