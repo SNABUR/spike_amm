@@ -182,7 +182,7 @@ module spike_amm::amm_router {
     amountAMin: u64,
     amountBMin: u64,
     to: address,
-  ) {
+  ): (u64, u64, u64, Object<Metadata>) {
     let tokenA_addr = object::object_address(&tokenA);
     let tokenB_addr = object::object_address(&tokenB);
     if (!amm_factory::pair_exists(tokenA, tokenB)) {
@@ -213,7 +213,13 @@ module spike_amm::amm_router {
     let asset0 = primary_fungible_store::withdraw(sender, token0, amount0Optimal);
     let asset1 = primary_fungible_store::withdraw(sender, token1, amount1Optimal);
 
-    amm_pair::mint(sender, asset0, asset1, to);
+    let (lp_amount, lp_token_metadata) = amm_pair::mint(sender, asset0, asset1, to);
+
+    if (token0 == tokenA) {
+        (amount0Optimal, amount1Optimal, lp_amount, lp_token_metadata)  // tokenA = token0, tokenB = token1
+    } else {
+        (amount1Optimal, amount0Optimal, lp_amount, lp_token_metadata)  // tokenA = token1, tokenB = token0
+    }
   }
 
   public entry fun add_liquidity(
@@ -225,25 +231,51 @@ module spike_amm::amm_router {
     amountAMin: u64,
     amountBMin: u64,
     to: address,
-    deadline: u64,
+    deadline: u64
   ) {
+    ensure(deadline); 
+
+    let (_, _, _, _) = add_liquidity_aux(
+        sender, 
+        tokenA, 
+        tokenB, 
+        amountADesired, 
+        amountBDesired, 
+        amountAMin, 
+        amountBMin, 
+        to
+    );
+  }
+
+  public fun add_liquidity_aux(
+    sender: &signer,
+    tokenA: address,
+    tokenB: address,
+    amountADesired: u64,
+    amountBDesired: u64,
+    amountAMin: u64,
+    amountBMin: u64,
+    to: address
+  ): (u64, u64, u64, Object<Metadata>) {
     validate_token_pair(tokenA, tokenB);
     validate_amount(amountADesired);
     validate_amount(amountBDesired);
-    ensure(deadline);
 
     let tokenA_object = object::address_to_object<Metadata>(tokenA);
     let tokenB_object = object::address_to_object<Metadata>(tokenB);
-    add_liquidity_internal(
-      sender,
-      tokenA_object,
-      tokenB_object, 
-      amountADesired, 
-      amountBDesired, 
-      amountAMin, 
-      amountBMin,
-      to
+    
+    let (amount0, amount1, lp_amount, lp_token_metadata) = add_liquidity_internal(
+        sender,
+        tokenA_object,
+        tokenB_object, 
+        amountADesired, 
+        amountBDesired, 
+        amountAMin, 
+        amountBMin,
+        to
     );
+    
+    (amount0, amount1, lp_amount, lp_token_metadata)
   }
 
   public entry fun add_liquidity_supra(
@@ -254,12 +286,33 @@ module spike_amm::amm_router {
     amount_supra_desired: u64,
     amount_supra_min: u64,
     to: address,
-    deadline: u64,
+    deadline: u64
   ) {
+    ensure(deadline);
+
+    let (_, _, _, _) = add_liquidity_supra_aux(
+        sender, 
+        token, 
+        amount_token_desired, 
+        amount_token_min, 
+        amount_supra_desired, 
+        amount_supra_min, 
+        to
+    );
+  }
+
+  public fun add_liquidity_supra_aux(
+    sender: &signer,
+    token: address,
+    amount_token_desired: u64,
+    amount_token_min: u64,
+    amount_supra_desired: u64,
+    amount_supra_min: u64,
+    to: address
+  ): (u64, u64, u64, Object<Metadata>) {
     validate_token_pair(token, WSUP);
     validate_amount(amount_token_desired);
     validate_amount(amount_supra_desired);
-    ensure(deadline);
     
     let sender_addr = signer::address_of(sender);
     let token_object = object::address_to_object<Metadata>(token);
@@ -269,53 +322,57 @@ module spike_amm::amm_router {
     let (token0, token1) = sort::sort_two_tokens(token_object, supra_object);
 
     if (!amm_factory::pair_exists(token0, token1)) {
-      amm_factory::create_pair(sender, token, supra_addr);
+        amm_factory::create_pair(sender, token, supra_addr);
     };
 
-    // Calculate amounts based on token order
     let (amount0_desired, amount1_desired) = if (token0 == token_object) {
-      (amount_token_desired, amount_supra_desired)
+        (amount_token_desired, amount_supra_desired)
     } else {
-      (amount_supra_desired, amount_token_desired)
+        (amount_supra_desired, amount_token_desired)
     };
     
     let (amount0_min, amount1_min) = if (token0 == token_object) {
-      (amount_token_min, amount_supra_min)
+        (amount_token_min, amount_supra_min)
     } else {
-      (amount_supra_min, amount_token_min)
+        (amount_supra_min, amount_token_min)
     };
 
     let (amount0, amount1) = calc_optimal_coin_values(
-      token0,
-      token1,
-      amount0_desired,
-      amount1_desired,
-      amount0_min,
-      amount1_min,
+        token0,
+        token1,
+        amount0_desired,
+        amount1_desired,
+        amount0_min,
+        amount1_min,
     );
 
     let supra_object_balance = primary_fungible_store::balance(sender_addr, supra_object);
     if (supra_object_balance < (if (token0 == supra_object) { amount0 } else { amount1 })) {
-      let amount_supra_to_deposit = (if (token0 == supra_object) { amount0 } else { amount1 }) - supra_object_balance;
-      wrap_supra(sender, amount_supra_to_deposit);
+        let amount_supra_to_deposit = (if (token0 == supra_object) { amount0 } else { amount1 }) - supra_object_balance;
+        wrap_supra(sender, amount_supra_to_deposit);
     };
 
     let (asset0, asset1) = if (token0 == token_object) {
-      (
-        primary_fungible_store::withdraw(sender, token_object, amount0),
-        primary_fungible_store::withdraw(sender, supra_object, amount1)
-      )
+        (
+            primary_fungible_store::withdraw(sender, token_object, amount0),
+            primary_fungible_store::withdraw(sender, supra_object, amount1)
+        )
     } else {
-      (
-        primary_fungible_store::withdraw(sender, supra_object, amount0),
-        primary_fungible_store::withdraw(sender, token_object, amount1)
-      )
+        (
+            primary_fungible_store::withdraw(sender, supra_object, amount0),
+            primary_fungible_store::withdraw(sender, token_object, amount1)
+        )
     };
 
-    amm_pair::mint(sender, asset0, asset1, to);
+    let (lp_amount, lp_token_metadata) = amm_pair::mint(sender, asset0, asset1, to);
+
+    if (token0 == token_object) {
+        (amount0, amount1, lp_amount, lp_token_metadata)  // token = token0, SupraCoin = token1
+    } else {
+        (amount1, amount0, lp_amount, lp_token_metadata)  // token = token1, SupraCoin = token0
+    }
   }
 
-  // We hope this will be deprecated soon
   public entry fun add_liquidity_coin<CoinType>(
     sender: &signer,
     token: address,
@@ -324,9 +381,31 @@ module spike_amm::amm_router {
     amount_coin_desired: u64,
     amount_coin_min: u64,
     to: address,
-    deadline: u64,
+    deadline: u64
   ) {
-    ensure(deadline);
+    ensure(deadline); 
+
+    let (_, _, _, _) = add_liquidity_coin_aux<CoinType>(
+        sender, 
+        token, 
+        amount_token_desired, 
+        amount_token_min, 
+        amount_coin_desired, 
+        amount_coin_min, 
+        to
+    );
+
+  }
+
+  public fun add_liquidity_coin_aux<CoinType>(
+    sender: &signer,
+    token: address,
+    amount_token_desired: u64,
+    amount_token_min: u64,
+    amount_coin_desired: u64,
+    amount_coin_min: u64,
+    to: address
+  ): (u64, u64, u64, Object<Metadata>) {
     let sender_addr = signer::address_of(sender);
     let token_object = object::address_to_object<Metadata>(token);
     let coin_object = option::destroy_some(coin::paired_metadata<CoinType>());
@@ -338,47 +417,54 @@ module spike_amm::amm_router {
         amm_factory::create_pair(sender, token, coin_addr);
     };
 
-    // Calculate amounts based on token order
     let (amount0_desired, amount1_desired) = if (token0 == token_object) {
-      (amount_token_desired, amount_coin_desired)
+        (amount_token_desired, amount_coin_desired)
     } else {
-      (amount_coin_desired, amount_token_desired)
+        (amount_coin_desired, amount_token_desired)
     };
     
     let (amount0_min, amount1_min) = if (token0 == token_object) {
-      (amount_token_min, amount_coin_min)
+        (amount_token_min, amount_coin_min)
     } else {
-      (amount_coin_min, amount_token_min)
+        (amount_coin_min, amount_token_min)
     };
 
     let (amount0, amount1) = calc_optimal_coin_values(
-      token0,
-      token1,
-      amount0_desired,
-      amount1_desired,
-      amount0_min,
-      amount1_min,
+        token0,
+        token1,
+        amount0_desired,
+        amount1_desired,
+        amount0_min,
+        amount1_min,
     );
 
     let coin_object_balance = primary_fungible_store::balance(sender_addr, coin_object);
     if (coin_object_balance < (if (token0 == coin_object) { amount0 } else { amount1 })) {
-      let amount_coin_to_deposit = (if (token0 == coin_object) { amount0 } else { amount1 }) - coin_object_balance;
-      wrap_coin<CoinType>(sender, amount_coin_to_deposit);
+        let amount_coin_to_deposit = (if (token0 == coin_object) { amount0 } else { amount1 }) - coin_object_balance;
+        wrap_coin<CoinType>(sender, amount_coin_to_deposit);
     };
 
     let (asset0, asset1) = if (token0 == token_object) {
-      (
-        primary_fungible_store::withdraw(sender, token_object, amount0),
-        primary_fungible_store::withdraw(sender, coin_object, amount1)
-      )
+        (
+            primary_fungible_store::withdraw(sender, token_object, amount0),
+            primary_fungible_store::withdraw(sender, coin_object, amount1)
+        )
     } else {
-      (
-        primary_fungible_store::withdraw(sender, coin_object, amount0),
-        primary_fungible_store::withdraw(sender, token_object, amount1)
-      )
+        (
+            primary_fungible_store::withdraw(sender, coin_object, amount0),
+            primary_fungible_store::withdraw(sender, token_object, amount1)
+        )
     };
 
-    amm_pair::mint(sender, asset0, asset1, to);
+    let (lp_amount, lp_token_metadata) = amm_pair::mint(sender, asset0, asset1, to);
+    
+    let (amount_token_added, amount_coin_added) = if (token0 == token_object) {
+        (amount0, amount1)
+    } else {
+        (amount1, amount0)
+    };
+    
+    (amount_token_added, amount_coin_added, lp_amount, lp_token_metadata)
   }
 
   //===================== REMOVE LIQUIDITY =======================================
@@ -430,19 +516,46 @@ module spike_amm::amm_router {
     deadline: u64
   ) {
     ensure(deadline);
+    let (_, _) = remove_liquidity_aux(
+        sender, 
+        tokenA, 
+        tokenB, 
+        liquidity, 
+        amountAMin, 
+        amountBMin, 
+        to
+    );
+    
+  }
+
+  public fun remove_liquidity_aux(
+    sender: &signer,
+    tokenA: address,
+    tokenB: address,
+    liquidity: u64,
+    amountAMin: u64,
+    amountBMin: u64,
+    to: address
+  ): (u64, u64) {
     let tokenA_object = object::address_to_object<Metadata>(tokenA);
     let tokenB_object = object::address_to_object<Metadata>(tokenB);
-    let (amountA, amountB) = remove_liquidity_internal(
-      sender, 
-      tokenA_object,
-      tokenB_object, 
-      liquidity, 
-      amountAMin, 
-      amountBMin
+    
+    let (assetA, assetB) = remove_liquidity_internal(
+        sender, 
+        tokenA_object,
+        tokenB_object, 
+        liquidity, 
+        amountAMin, 
+        amountBMin
     );
 
-    primary_fungible_store::deposit(to, amountA);
-    primary_fungible_store::deposit(to, amountB);
+    let amountA = fungible_asset::amount(&assetA);
+    let amountB = fungible_asset::amount(&assetB);
+
+    primary_fungible_store::deposit(to, assetA);
+    primary_fungible_store::deposit(to, assetB);
+
+    (amountA, amountB)
   }
 
   public entry fun remove_liquidity_supra(
@@ -452,24 +565,47 @@ module spike_amm::amm_router {
     amount_token_min: u64,
     amount_supra_min: u64,
     to: address,
-    deadline: u64,
+    deadline: u64
   ) {
     ensure(deadline);
 
-    let token_object = object::address_to_object<Metadata>(token);
-    let supra_object = option::destroy_some(coin::paired_metadata<SupraCoin>());
-
-    let (amount_token, amount_supra) = remove_liquidity_internal(
-      sender, 
-      token_object,
-      supra_object, 
-      liquidity, 
-      amount_token_min, 
-      amount_supra_min
+    let (_, _) = remove_liquidity_supra_aux(
+        sender, 
+        token, 
+        liquidity, 
+        amount_token_min, 
+        amount_supra_min, 
+        to
     );
+  }
 
-    primary_fungible_store::deposit(to, amount_token);
-    primary_fungible_store::deposit(to, amount_supra);
+  public fun remove_liquidity_supra_aux(
+    sender: &signer,
+    token: address,
+    liquidity: u64,
+    amount_token_min: u64,
+    amount_supra_min: u64,
+    to: address
+  ): (u64, u64) {
+      let token_object = object::address_to_object<Metadata>(token);
+      let supra_object = option::destroy_some(coin::paired_metadata<SupraCoin>());
+
+      let (asset_token, asset_supra) = remove_liquidity_internal(
+          sender, 
+          token_object,
+          supra_object, 
+          liquidity, 
+          amount_token_min, 
+          amount_supra_min
+      );
+
+      let amountA = fungible_asset::amount(&asset_token);
+      let amountB = fungible_asset::amount(&asset_supra);
+
+      primary_fungible_store::deposit(to, asset_token);
+      primary_fungible_store::deposit(to, asset_supra);
+
+      (amountA, amountB)
   }
 
   //===================== SWAP ==========================================
@@ -900,6 +1036,36 @@ module spike_amm::amm_router {
       primary_fungible_store::deposit(to, out);
       i = i + 1;
     };
+  }
+
+  #[view]
+  public fun view_remove_liquidity(
+    tokenA: address,
+    tokenB: address,
+    liquidity: u64
+  ): (u64, u64) {
+      //Entry validation
+    let tokenA_object = object::address_to_object<Metadata>(tokenA);
+    let tokenB_object = object::address_to_object<Metadata>(tokenB);
+      assert!(liquidity > 0, ERROR_ZERO_AMOUNT);
+      assert!(
+          object::object_address(&tokenA_object) != object::object_address(&tokenB_object),
+          ERROR_IDENTICAL_TOKENS
+      );
+
+      let pair = amm_pair::liquidity_pool(tokenA_object, tokenB_object);
+
+      let (reserve_a, reserve_b, _) = amm_pair::get_reserves(pair);
+      let total_supply = amm_pair::lp_token_supply(pair);
+
+      let expected_a = (liquidity as u128) * (reserve_a as u128) / (total_supply as u128);
+      let expected_b = (liquidity as u128) * (reserve_b as u128) / (total_supply as u128);
+
+      if (sort::is_sorted_two(tokenA_object, tokenB_object)) {
+          ((expected_a as u64), (expected_b as u64))
+      } else {
+          ((expected_b as u64), (expected_a as u64))
+      }
   }
 
   // performs chained get_amount_out calculations on any number of pairs
