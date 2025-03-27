@@ -32,6 +32,7 @@ module spike_amm::amm_controller {
     pending_admin: address,
     fee_on: bool,
     paused: bool,
+    swap_fee: u8
   }
 
   /// Initializes the AMM protocol with default configuration.
@@ -47,7 +48,8 @@ module spike_amm::amm_controller {
       current_admin: ADMIN,
       pending_admin: @0x0,
       fee_on: true,
-      paused: false
+      paused: false,
+      swap_fee: 25
     })
   }
 
@@ -60,6 +62,12 @@ module spike_amm::amm_controller {
   #[view]
   public fun get_signer_address(): address acquires SwapConfig {
     signer::address_of(&get_signer())
+  }
+
+  //by default swap fee is 25 or 0.25% max fee possible is u8: 256 or 2.5% 
+  #[view]
+  public fun get_swap_fee(): u8 acquires SwapConfig {
+    safe_swap_config().swap_fee
   }
 
   #[view]
@@ -105,6 +113,16 @@ module spike_amm::amm_controller {
     let swap_config = borrow_global_mut<SwapConfig>(@spike_amm);
     assert!(signer::address_of(account) == swap_config.current_admin, ERROR_FORBIDDEN);
     swap_config.paused = false;
+  }
+
+  
+  public(friend) fun set_swap_fee(
+    account: &signer,
+    swap_fee: u8
+  ) acquires SwapConfig {
+    let swap_config = borrow_global_mut<SwapConfig>(@spike_amm);
+    assert!(signer::address_of(account) == swap_config.current_admin, ERROR_FORBIDDEN);
+    swap_config.swap_fee = swap_fee;
   }
 
   public(friend) fun set_fee_to(
